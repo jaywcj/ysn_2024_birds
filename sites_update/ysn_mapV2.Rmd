@@ -1,0 +1,82 @@
+```{r}
+#install.packages('pacman') #package manager for new r users
+library(pacman)
+
+p_load(leaflet)
+p_load(tidyverse)
+p_load(dplyr)
+p_load(readxl)
+p_load(janitor)
+p_load(htmlwidgets)
+p_load(googlesheets4)
+```
+
+```{r}
+#load files
+
+read.csv("ysn_sites.csv") -> ysn_sites
+#read_excel("23mar24_sessinonplan.xlsx") -> update # this file should be updated as we go along
+read_sheet("https://docs.google.com/spreadsheets/d/17qsG5r8Z18RHOw3hiTzHGBczB-3qcOymNORIQiWUn5I/edit#gid=1216590995") -> update
+
+#view(ysn_sites)
+#view(update)
+```
+
+```{r}
+#data wrangling
+
+update <- update %>% 
+  row_to_names(row_number = 1) %>%
+  select(1,3,4) %>% 
+  rename(park_abbrev = 'Point Label')
+  
+
+#combine to form main dataframe - join by park abbrev, which is the common column
+df <- ysn_sites %>% 
+  inner_join(update, by = c("park_abbrev")) %>%
+  select(-"park_abbrev") #remove duplicate column
+
+```
+
+```{r}
+#now we can map it
+
+pal <- colorFactor(c("navy", "green4" ),
+                   domain = unique(df$Check_label))
+
+```
+
+
+```{r}
+#if it's too messy to have each individual point, we can group by park (based on the average location)
+
+#create new dataframe
+df_by_park <- df %>%
+  group_by(Park) %>%
+  reframe(
+    centroid_longitude = mean(longitude),
+    centroid_latitude = mean(latitude),
+    check = Check) %>%
+  mutate(check_label = ifelse(check, "Surveyed", "Not yet surveyed")) %>% #change labels for the legend
+  distinct() 
+
+
+#map
+map_park <- df_by_park %>% 
+  leaflet(options = leafletOptions(maxZoom = 18, minZoom = 11)) %>%
+  addProviderTiles('CartoDB.Voyager') %>%
+  addCircleMarkers(lng = ~centroid_longitude, lat = ~centroid_latitude,
+                   stroke = TRUE, weight = 1, fillOpacity = 0.6, fillColor = ~pal(check_label),
+                   color = 'black', 
+                   popup = ~Park,
+                   label=~as.character(Park),
+                   labelOptions = labelOptions(noHide = FALSE, direction = 'top', noOverlap = TRUE)) %>%
+  addLegend(position = "bottomright", pal = pal, values = ~check_label,
+                 title = "Status", opacity = 1)
+
+map_park
+
+saveWidget(map_park, file = "map_by_parks_api.html", selfcontained = TRUE, title = 'YSN Map - Parks')
+
+```
+
